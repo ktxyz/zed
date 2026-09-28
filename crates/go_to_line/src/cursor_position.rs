@@ -14,6 +14,7 @@ use workspace::{HideStatusItem, StatusBarSettings, StatusItemView, Workspace, it
 pub(crate) struct SelectionStats {
     pub lines: usize,
     pub characters: usize,
+    pub words: usize,
     pub selections: usize,
 }
 
@@ -120,6 +121,20 @@ impl CursorPosition {
                                         );
                                         cursor_position.selected_count.characters +=
                                             selection_summary.chars;
+                                        let mut in_word = false;
+                                        for chunk in snapshot
+                                            .buffer_snapshot()
+                                            .text_for_range(selection.start..selection.end)
+                                        {
+                                            for character in chunk.chars() {
+                                                if character.is_whitespace() {
+                                                    in_word = false;
+                                                } else if !in_word {
+                                                    in_word = true;
+                                                    cursor_position.selected_count.words += 1;
+                                                }
+                                            }
+                                        }
                                         if selection.end != selection.start {
                                             cursor_position.selected_count.lines +=
                                                 (selection.end.row - selection.start.row) as usize;
@@ -167,6 +182,7 @@ impl CursorPosition {
         let SelectionStats {
             lines,
             characters,
+            words,
             selections,
         } = self.selected_count;
         let format = LineIndicatorFormat::get(None, cx);
@@ -174,13 +190,14 @@ impl CursorPosition {
         let lines = (lines > 1).then_some((lines, "line"));
         let selections = (selections > 1).then_some((selections, "selection"));
         let characters = (characters > 0).then_some((characters, "character"));
-        if (None, None, None) == (characters, selections, lines) {
+        let words = (words > 0).then_some((words, "word"));
+        if (None, None, None, None) == (characters, selections, lines, words) {
             // Nothing to display.
             return;
         }
         write!(text, " (").unwrap();
         let mut wrote_once = false;
-        for (count, name) in [selections, lines, characters].into_iter().flatten() {
+        for (count, name) in [selections, lines, characters, words].into_iter().flatten() {
             if wrote_once {
                 write!(text, ", ").unwrap();
             }

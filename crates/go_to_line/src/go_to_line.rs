@@ -633,6 +633,7 @@ mod tests {
                 &SelectionStats {
                     lines: 0,
                     characters: 0,
+                    words: 0,
                     selections: 1,
                 },
                 workspace
@@ -654,6 +655,7 @@ mod tests {
                 &SelectionStats {
                     lines: 1,
                     characters: 3,
+                    words: 1,
                     selections: 1,
                 },
                 workspace
@@ -664,6 +666,74 @@ mod tests {
                     .read(cx)
                     .selection_stats(),
                 "After selecting a text with multibyte unicode characters, the character count should be correct"
+            );
+        });
+    }
+
+    #[gpui::test]
+    async fn test_word_count_selection(cx: &mut TestAppContext) {
+        init_test(cx);
+
+        let fs = FakeFs::new(cx.executor());
+        fs.insert_tree(
+            path!("/dir"),
+            json!({
+                "a.rs": "hello world\nfoo bar"
+            }),
+        )
+        .await;
+
+        let project = Project::test(fs, [path!("/dir").as_ref()], cx).await;
+        let (multi_workspace, cx) =
+            cx.add_window_view(|window, cx| MultiWorkspace::test_new(project.clone(), window, cx));
+        let workspace = multi_workspace.read_with(cx, |mw, _| mw.workspace().clone());
+        workspace.update_in(cx, |workspace, window, cx| {
+            let cursor_position = cx.new(|_| CursorPosition::new(workspace));
+            workspace.status_bar().update(cx, |status_bar, cx| {
+                status_bar.add_right_item(cursor_position, window, cx);
+            });
+        });
+
+        let worktree_id = workspace.update(cx, |workspace, cx| {
+            workspace.project().update(cx, |project, cx| {
+                project.worktrees(cx).next().unwrap().read(cx).id()
+            })
+        });
+        let _buffer = project
+            .update(cx, |project, cx| {
+                project.open_local_buffer(path!("/dir/a.rs"), cx)
+            })
+            .await
+            .unwrap();
+        let editor = workspace
+            .update_in(cx, |workspace, window, cx| {
+                workspace.open_path((worktree_id, rel_path("a.rs")), None, true, window, cx)
+            })
+            .await
+            .unwrap()
+            .downcast::<Editor>()
+            .unwrap();
+
+        editor.update_in(cx, |editor, window, cx| {
+            editor.select_all(&SelectAll, window, cx)
+        });
+        cx.executor().advance_clock(Duration::from_millis(200));
+        workspace.update(cx, |workspace, cx| {
+            assert_eq!(
+                &SelectionStats {
+                    lines: 2,
+                    characters: 19,
+                    words: 4,
+                    selections: 1,
+                },
+                workspace
+                    .status_bar()
+                    .read(cx)
+                    .item_of_type::<CursorPosition>()
+                    .expect("missing cursor position item")
+                    .read(cx)
+                    .selection_stats(),
+                "After selecting words across multiple lines, the word count should be correct"
             );
         });
     }
